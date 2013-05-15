@@ -4,4 +4,4 @@ muscle-wizard
 roguelikes and shit
 
 
-python and libtcod
+python and libtcod required to run
