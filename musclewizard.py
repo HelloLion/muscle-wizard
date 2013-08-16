@@ -1,23 +1,32 @@
 import libtcodpy as libtcod
 import math
+import textwrap
 
-SCREEN_WIDTH = 80
-SCREEN_HEIGHT = 50
+SCREEN_WIDTH = 100
+SCREEN_HEIGHT = 80
 
-MAP_WIDTH = 80
-MAP_HEIGHT = 45
+MAP_WIDTH = 100
+MAP_HEIGHT = 73
 
 ROOM_MAX_SIZE = 10
 ROOM_MIN_SIZE = 6
 MAX_ROOMS = 30
 
+MAX_ROOM_MONSTERS = 3
+
+BAR_WIDTH = 20
+PANEL_HEIGHT = 7
+PANEL_Y = SCREEN_HEIGHT - PANEL_HEIGHT
+
 FOV_ALGO = 0
 FOV_LIGHT_WALLS = True
 TORCH_RADIUS = 10
 
-LIMIT_FPS = 20
+MSG_X = BAR_WIDTH + 2
+MSG_WIDTH = SCREEN_WIDTH - BAR_WIDTH - 2
+MSG_HEIGHT = PANEL_HEIGHT - 1
 
-MAX_ROOM_MONSTERS = 3
+LIMIT_FPS = 20
 
 color_dark_wall = libtcod.Color(31, 31, 31)
 color_light_wall = libtcod.Color(127, 127, 127)
@@ -25,7 +34,7 @@ color_dark_ground = libtcod.Color(31, 24, 15)
 color_light_ground = libtcod.Color(127, 101, 63)
 
 class Tile:
-  #a tile of the map and its properties
+	#a tile of the map and its properties
 	def __init__(self, blocked, block_sight = None):
 		self.blocked = blocked
 		
@@ -55,19 +64,50 @@ class Rect:
 class Object:
 	#this is a generic object: the player, a monster, an item, the stairs...
 	#it's always represented by a character on screen.
-	def __init__(self, x, y, char, name, color, blocks=False, figher=None, ai=None):
+	def __init__(self, x, y, char, name, color, blocks=False, fighter=None, ai=None):
 		self.x = x
 		self.y = y
 		self.char = char
 		self.name = name
 		self.color = color
 		self.blocks = blocks
+		self.fighter = fighter
+		if self.fighter: #let the fighter component know who owns it
+			self.fighter.owner = self
+		
+		self.ai = ai
+		if self.ai: #let the ai component know who owns it
+			self.ai.owner = self
 	
 	def move(self, dx, dy):
 		#move by the given amount
 		if not is_blocked(self.x + dx, self.y + dy):
 			self.x += dx
 			self.y += dy
+			
+	def move_towards(self, target_x, target_y):
+		#vector from this object to the target, and distance
+		dx = target_x - self.x
+		dy = target_y - self.y
+		distance = math.sqrt(dx ** 2 + dy ** 2)
+		
+		#normalize it to length 1 (preserving direction), then round it and
+		#convert to integer so the movement is restricted to the map grid
+		dx = int(round(dx / distance))
+		dy = int(round(dy / distance))
+		self.move(dx, dy)
+		
+	def distance_to(self, other):
+		#return the distance to another object
+		dx = other.x - self.x
+		dy = other.y - self.y
+		return math.sqrt(dx ** 2 + dy ** 2)
+		
+	def send_to_back(self):
+		#make this object be drawn first
+		global objects
+		objects.remove(self)
+		objects.insert(0, self)
 	
 	def draw(self):
 		#set the color and then draw the character that represents this object at its position
@@ -78,18 +118,63 @@ class Object:
 	def clear(self):
 		#erase the character that represents this object
 		libtcod.console_put_char(con, self.x, self.y, ' ', libtcod.BKGND_NONE)
+	
+
+		
+
 		
 class Fighter:
-	def __init__(self, hp, defense, power):
+	def __init__(self, hp, defense, power, death_function=None):
 		self.max_hp = hp
 		self.hp = hp
 		self.defense = defense
 		self.power = power
+		self.death_function = death_function
+			
+	def attack(self, target):
+		#a simple formula for attack damage with some chance
+		#luck = libtcod.random_get_int(0, -3, 3)
+			
+		#basedmg = self.power - target.fighter.defense
+		#damage = basedmg + luck
 		
+		damage = self.power - target.fighter.defense
+		
+		if damage > 0:
+			#make the target take some damage
+			message(self.owner.name.capitalize() + ' attacks ' + target.name + ' for ' + str(damage) + ' health.', libtcod.dark_red)
+			target.fighter.take_damage(damage)
+		else:
+			message(self.owner.name.capitalize() + ' attacks ' + target.name + ' but it has no effect!', libtcod.light_green)
+			
+	def take_damage(self, damage):
+		#apply damage if possible
+		if damage > 0:
+			self.hp -= damage
+			
+			#check for death.
+			if self.hp <= 0:
+				function = self.death_function
+				if function is not None:
+					function(self.owner)
+		
+
+
 class BasicMonster:
 	def take_turn(self):
-		print 'The ' + self.owner.name + ' growls!'
-		
+	#a basic monster takes its turn. If you can see it, it can see you
+		monster = self.owner
+		if libtcod.map_is_in_fov(fov_map, monster.x, monster.y):
+				
+			#move towards player if far away
+			if monster.distance_to(player) >= 2:
+				monster.move_towards(player.x, player.y)
+					
+			#close enough, attack! (if the player is still alive)
+			elif player.fighter.hp > 0:
+				monster.fighter.attack(player)
+				
+
 def is_blocked(x, y):
 	if map[x][y].blocked:
 		return True
@@ -186,19 +271,57 @@ def place_objects(room):
 		if not is_blocked(x, y):
 			choice = libtcod.random_get_int(0, 0, 100)
 			if choice < 20:
-				#tentacled monstrosity
-				monster = Object(x, y, 't', 'tentacled monstrosity', libtcod.light_azure, blocks=True)
-			elif choice < 20+40:
-				#ghoul
-				monster = Object(x, y, 'g', 'ghoul', libtcod.lightest_grey, blocks=True)
-			elif choice < 20+40+10:
-				#spectre
-				monster = Object(x, y, 's', 'spectre', libtcod.lightest_sea, blocks=True)
+				#malicious robot
+				figher_component = Fighter(hp=15, defense=1, power =3, death_function=monster_death)
+				ai_component = BasicMonster()
+				monster = Object(x, y, 'R', 'malicious robot', libtcod.lightest_grey, blocks=True, ai=ai_component, fighter=fighter_component)
+			elif choice < 40 and choice >= 20:
+				#small dinosaur
+				figher_component = Fighter(hp=13, defense=1, power =4, death_function=monster_death)
+				ai_component = BasicMonster()
+				monster = Object(x, y, 'd', 'small dinosaur', libtcod.darkest_green, blocks=True, ai=ai_component, fighter=fighter_component)
+			elif choice < 60 and choice >= 40:
+				#floating brain
+				figher_component = Fighter(hp=8, defense=0, power =1, death_function=monster_death)
+				ai_component = BasicMonster()
+				monster = Object(x, y, 'b', 'floating brain', libtcod.light_pink, blocks=True, ai=ai_component, fighter=fighter_component)
 			else:
-				#devil
-				monster = Object(x, y, 'd', 'devil', libtcod.light_red, blocks=True)
+				#imp
+				figher_component = Fighter(hp=10, defense=0, power =3, death_function=monster_death)
+				ai_component = BasicMonster()
+				monster = Object(x, y, 'i', 'imp', libtcod.light_red, blocks=True, ai=ai_component, fighter=fighter_component)
 			
 			objects.append(monster)
+
+
+def render_bar(x, y, total_width, name, value, maximum, bar_color, back_color):
+	#render a bar (HP, experience, etc)
+	bar_width = int(float(value) / maximum * total_width)
+	
+	#render background
+	libtcod.console_set_default_background(panel, back_color)
+	libtcod.console_rect(panel, x, y, total_width, 1, False, libtcod.BKGND_SCREEN)
+	
+	#now render the bar on top
+	libtcod.console_set_default_background(panel, bar_color)
+	if bar_width > 0:
+		libtcod.console_rect(panel, x, y, bar_width, 1, False, libtcod.BKGND_SCREEN)
+		
+	#sexy text
+	libtcod.console_set_default_foreground(panel, libtcod.darkest_grey)
+	libtcod.console_print_ex(panel, x + total_width / 2, y, libtcod.BKGND_NONE, libtcod.CENTER, name + ': ' + str(value) + '/' +str(maximum))
+
+def message(new_msg, color = libtcod.white):
+	#split msg if necessary
+	new_msg_lines = textwrap.wrap(new_msg, MSG_WIDTH)
+	
+	for line in new_msg_lines:
+		#if the buffer is full, remove the first line
+		if len(game_msgs) == MSG_HEIGHT:
+			del game_msgs[0]
+			
+		#add the new line as a tuple
+		game_msgs.append( (line, color) )
 
 	
 def render_all():
@@ -228,9 +351,32 @@ def render_all():
 					map[x][y].explored = True
 				
 	for object in objects:
-		object.draw()
+		if object != player:
+			object.draw()
+	player.draw()
 		
-	libtcod.console_blit(con, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, 0, 0, 0)
+	libtcod.console_blit(con, 0, 0, MAP_WIDTH, MAP_HEIGHT, 0, 0, 0)
+	
+	#prepare to render GUI panel
+	libtcod.console_set_default_background(panel, libtcod.darkest_grey)
+	libtcod.console_clear(panel)
+	
+	#print sum messages son but do it 1 line at a time
+	y = 1
+	for (line, color) in game_msgs:
+		libtcod.console_set_default_foreground(panel, color)
+		libtcod.console_print_ex(panel, MSG_X, y, libtcod.BKGND_NONE, libtcod.LEFT, line)
+		y += 1
+	
+	#statz
+	render_bar(1, 1, BAR_WIDTH, 'HP', player.fighter.hp, player.fighter.max_hp, libtcod.light_red, libtcod.darkest_crimson)
+	
+	#display names of objects under mouse
+	libtcod.console_set_default_foreground(panel, libtcod.light_gray)
+	libtcod.console_print_ex(panel, MSG_X + 2, 0, libtcod.BKGND_NONE, libtcod.LEFT, get_names_under_mouse())
+	
+	#blit the contents of "panel" to the root console
+	libtcod.console_blit(panel, 0, 0, SCREEN_WIDTH, PANEL_HEIGHT, 0, 0, PANEL_Y)
 	
 def player_move_or_attack(dx, dy):
 	global fov_recompute
@@ -241,20 +387,19 @@ def player_move_or_attack(dx, dy):
 	
 	target = None
 	for object in objects:
-		if object.x == x and object.y == y:
+		if object.fighter and object.x == x and object.y == y:
 			target = object
 			break
 	
 	if target is not None:
-		print 'The ' + target.name + ' garbles at you incomprehensibly.'
+		player.fighter.attack(target)
 	else:
 		player.move(dx, dy)
 		fov_recompute = True
 
 def handle_keys():
-	global fov_recompute
+	global key;
 	
-	key = libtcod.console_wait_for_keypress(True)
 
 	if key.vk == libtcod.KEY_ENTER and key.lalt:
 		#Alt+Enter: toggle fullscreen
@@ -265,33 +410,74 @@ def handle_keys():
  
 	if game_state == 'playing':
 		#movement keys
-		if libtcod.console_is_key_pressed(libtcod.KEY_UP):
-			player.move(0, -1)
-			fov_recompute = True
+		if key.vk == libtcod.KEY_UP:
+			player_move_or_attack(0, -1)
 	 
-		elif libtcod.console_is_key_pressed(libtcod.KEY_DOWN):
-			player.move(0, 1)
-			fov_recompute = True
+		elif key.vk == libtcod.KEY_DOWN:
+			player_move_or_attack(0, 1)
 	 
-		elif libtcod.console_is_key_pressed(libtcod.KEY_LEFT):
-			player.move(-1, 0)
-			fov_recompute = True
+		elif key.vk == libtcod.KEY_LEFT:
+			player_move_or_attack(-1, 0)
 	 
-		elif libtcod.console_is_key_pressed(libtcod.KEY_RIGHT):
-			player.move(1, 0)
-			fov_recompute = True
+		elif key.vk == libtcod.KEY_RIGHT:
+			player_move_or_attack(1, 0)
 			
 		else:
 			return 'didnt-take-turn'
+			
+def get_names_under_mouse():
+	global mouse
+	
+	#return a string with the names of all objects under the mouse
+	(x, y) = (mouse.cx, mouse.cy)
+	
+	#create a list with the names of all objects at the mouse's coordinates and in FOV
+	names = [obj.name for obj in objects
+		if obj.x == x and obj.y == y and libtcod.map_is_in_fov(fov_map, obj.x, obj.y)]
+		
+	names = ', '.join(names)
+	return names.capitalize()
 
-libtcod.console_set_custom_font('prestige10x10_gs_tc.png', libtcod.FONT_TYPE_GREYSCALE | libtcod.FONT_LAYOUT_TCOD)
+			
+def player_death(player):
+	#oh no!
+	global game_state
+	message('You am no true Muscle Wizard!', libtcod.light_crimson)
+	game_state = 'dead'
+	
+	#corpsify
+	player.char = '%'
+	player.color = libtcod.dark_red
+
+
+def monster_death(monster):
+	#transforms it into a corpse!
+	message('You have overcome ' + monster.name + '!', libtcod.orange)
+	monster.char = '%'
+	monster.color = libtcod.dark_red
+	monster.blocks = False
+	monster.fighter = None
+	monster.ai = None
+	monster.name = 'remains of ' + monster.name
+	monster.send_to_back()
+
+	
+	
+#main loop all up in dis
+#u don't even kno
+#this code be fresh and poppin
+	
+libtcod.console_set_custom_font('prestige12x12_gs_tc.png', libtcod.FONT_TYPE_GREYSCALE | libtcod.FONT_LAYOUT_TCOD)
 
 libtcod.console_init_root(SCREEN_WIDTH, SCREEN_HEIGHT, 'MUSCLE WIZARD', False)
 libtcod.sys_set_fps(LIMIT_FPS)
-con = libtcod.console_new(SCREEN_WIDTH, SCREEN_HEIGHT)
+con = libtcod.console_new(MAP_WIDTH, MAP_HEIGHT)
+
+panel = libtcod.console_new(SCREEN_WIDTH, PANEL_HEIGHT)
 
 #create player object
-player = Object(0, 0, '@', 'player', libtcod.white, blocks=True)
+fighter_component = Fighter(hp=30, defense=2, power=6, death_function=player_death)
+player = Object(0, 0, '@', 'player', libtcod.white, blocks=True, fighter=fighter_component)
 
 #list of objects starting with player
 objects = [player]
@@ -307,7 +493,18 @@ fov_recompute = True
 game_state = 'playing'
 player_action = None
 
+#create list of game messages, starts empty
+game_msgs = []
+
+#a warm welcoming message!
+message('What ho, Muscle Wizard! Have thou what it takes to best mine dungeon?', libtcod.light_blue)
+
+mouse = libtcod.Mouse()
+key = libtcod.Key()
+
 while not libtcod.console_is_window_closed():
+
+	libtcod.sys_check_for_event(libtcod.EVENT_KEY_PRESS|libtcod.EVENT_MOUSE,key,mouse)
 
 	render_all()
 
@@ -325,6 +522,6 @@ while not libtcod.console_is_window_closed():
 	
 	if game_state == 'playing' and player_action != 'didnt-take-turn':
 		for object in objects:
-			if object != player:
-				print 'The ' + object.name + ' growls!'
+			if object.ai:
+				object.ai.take_turn()
 	
