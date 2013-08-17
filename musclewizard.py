@@ -132,13 +132,12 @@ class Fighter:
 		self.death_function = death_function
 			
 	def attack(self, target):
-		#a simple formula for attack damage with some chance
-		#luck = libtcod.random_get_int(0, -3, 3)
+		#a simple formula for attack damage with some chance 
+		luck = libtcod.random_get_int(0, -3, 3)
 			
-		#basedmg = self.power - target.fighter.defense
-		#damage = basedmg + luck
+		basedmg = self.power - target.fighter.defense
+		damage = basedmg + luck
 		
-		damage = self.power - target.fighter.defense
 		
 		if damage > 0:
 			#make the target take some damage
@@ -272,22 +271,22 @@ def place_objects(room):
 			choice = libtcod.random_get_int(0, 0, 100)
 			if choice < 20:
 				#malicious robot
-				figher_component = Fighter(hp=15, defense=1, power =3, death_function=monster_death)
+				fighter_component = Fighter(hp=15, defense=1, power =3, death_function=monster_death)
 				ai_component = BasicMonster()
 				monster = Object(x, y, 'R', 'malicious robot', libtcod.lightest_grey, blocks=True, ai=ai_component, fighter=fighter_component)
 			elif choice < 40 and choice >= 20:
 				#small dinosaur
-				figher_component = Fighter(hp=13, defense=1, power =4, death_function=monster_death)
+				fighter_component = Fighter(hp=13, defense=1, power =4, death_function=monster_death)
 				ai_component = BasicMonster()
 				monster = Object(x, y, 'd', 'small dinosaur', libtcod.darkest_green, blocks=True, ai=ai_component, fighter=fighter_component)
 			elif choice < 60 and choice >= 40:
 				#floating brain
-				figher_component = Fighter(hp=8, defense=0, power =1, death_function=monster_death)
+				fighter_component = Fighter(hp=8, defense=0, power =1, death_function=monster_death)
 				ai_component = BasicMonster()
 				monster = Object(x, y, 'b', 'floating brain', libtcod.light_pink, blocks=True, ai=ai_component, fighter=fighter_component)
 			else:
 				#imp
-				figher_component = Fighter(hp=10, defense=0, power =3, death_function=monster_death)
+				fighter_component = Fighter(hp=10, defense=0, power =3, death_function=monster_death)
 				ai_component = BasicMonster()
 				monster = Object(x, y, 'i', 'imp', libtcod.light_red, blocks=True, ai=ai_component, fighter=fighter_component)
 			
