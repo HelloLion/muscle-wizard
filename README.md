@@ -1,7 +1,8 @@
-muscle-wizard
+GEAR: Wizard of the Techno Nexus
 =============
 
-roguelikes and shit
+Homage to the strange videogames I played as a lad. Roguelike. Currently very alpha.
 
+Uses the Library of Doryen (libtcod).
 
-python and libtcod required to run
+Python 2.7
